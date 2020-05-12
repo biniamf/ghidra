@@ -15,7 +15,7 @@
  */
 package generic.test;
 
-import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.*;
 
 import java.awt.*;
 import java.awt.event.*;
@@ -248,8 +248,9 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 */
 	public static Set<Window> getAllWindows() {
 		Set<Window> set = new HashSet<>();
-		Frame sharedOwnerFrame = (Frame) AppContext.getAppContext().get(
-			new StringBuffer("SwingUtilities.sharedOwnerFrame"));
+		Frame sharedOwnerFrame = (Frame) AppContext.getAppContext()
+				.get(
+					new StringBuffer("SwingUtilities.sharedOwnerFrame"));
 		if (sharedOwnerFrame != null) {
 			set.addAll(getAllWindows(sharedOwnerFrame));
 		}
@@ -446,6 +447,8 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 
 	// TODO deprecate this; at time of writing there are 1174 references; wait until it is
 	//      a more reasonable number
+	//
+	//      Update: 744 references at 12/1/19
 	public static void waitForPostedSwingRunnables() {
 		waitForSwing();
 	}
@@ -500,7 +503,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Sets the instance field by the given name on the given object instance.
 	 * <p>
-	 * Note: if the field is static, then the <tt>ownerInstance</tt> field can
+	 * Note: if the field is static, then the <code>ownerInstance</code> field can
 	 * be the class of the object that contains the variable.
 	 *
 	 * @param fieldName The name of the field to retrieve.
@@ -522,7 +525,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * Gets the instance field by the given name on the given object instance.
 	 * The value is a primitive wrapper if it is a primitive type.
 	 * <p>
-	 * Note: if the field is static, then the <tt>ownerInstance</tt> field can
+	 * Note: if the field is static, then the <code>ownerInstance</code> field can
 	 * be the class of the object that contains the variable.
 	 *
 	 * @param fieldName The name of the field to retrieve.
@@ -568,9 +571,9 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Uses reflection to execute the method denoted by the given method name.
 	 * If any value is returned from the method execution, then it will be
-	 * returned from this method. Otherwise, <tt>null</tt> is returned.
+	 * returned from this method. Otherwise, <code>null</code> is returned.
 	 * <p>
-	 * Note: if the method is static, then the <tt>ownerInstance</tt> field can
+	 * Note: if the method is static, then the <code>ownerInstance</code> field can
 	 * be the class of the object that contains the method.
 	 *
 	 * @param methodName The name of the method to execute.
@@ -1288,7 +1291,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	}
 
 	public static void clickTableCell(final JTable table, final int row, final int col,
-			int clickCount) throws Exception {
+			int clickCount) {
 		runSwing(() -> table.setRowSelectionInterval(row, row));
 		waitForSwing();
 		Rectangle rect = table.getCellRect(row, col, true);
@@ -1303,10 +1306,8 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * @param list the list to select from
 	 * @param row the initial index
 	 * @param count the number of rows to select
-	 * @throws Exception if there's a problem simulating the click
 	 */
-	public static void clickListRange(final JList list, final int row, int count)
-			throws Exception {
+	public static void clickListRange(final JList<?> list, final int row, int count) {
 		waitForSwing();
 		for (int i = row; i < row + count; i++) {
 			Rectangle rect = list.getCellBounds(i, i);
@@ -1315,7 +1316,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 		}
 		waitForSwing();
 	}
-	
+
 	/**
 	 * Clicks a range of items in a table (simulates holding SHIFT and selecting
 	 * each item in the range)
@@ -1323,10 +1324,8 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * @param table the table to select
 	 * @param row the starting row index
 	 * @param count the number of rows to select
-	 * @throws Exception
 	 */
-	public static void clickTableRange(final JTable table, final int row, int count)
-			throws Exception {
+	public static void clickTableRange(final JTable table, final int row, int count) {
 		waitForSwing();
 		for (int i = row; i < row + count; i++) {
 			Rectangle rect = table.getCellRect(i, 0, true);
@@ -1482,7 +1481,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Invoke <code>fixupGUI</code> at the beginning of your JUnit test or in
 	 * its setup() method to make your GUI for the JUnit test appear using the
-	 * system Look & Feel. The system look and feel is the default that Ghidra
+	 * system Look and Feel. The system look and feel is the default that Ghidra
 	 * uses. This will also change the default fonts for the JUnit test to be
 	 * the same as those in Ghidra.
 	 *
@@ -1516,6 +1515,29 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 		UIManager.put("PasswordField.font", f);
 		UIManager.put("TextArea.font", f);
 	}
+
+	/**
+	 * Signals that the client expected the System Under Test (SUT) to report errors.  Use this
+	 * when you wish to verify that errors are reported and you do not want those errors to
+	 * fail the test.  The default value for this setting is false, which means that any
+	 * errors reported will fail the running test.
+	 *
+	 * @param expected true if errors are expected.
+	 */
+	public static void setErrorsExpected(boolean expected) {
+		if (expected) {
+			Msg.error(AbstractGenericTest.class, ">>>>>>>>>>>>>>>> Expected Exception");
+			ConcurrentTestExceptionHandler.disable();
+		}
+		else {
+			Msg.error(AbstractGenericTest.class, "<<<<<<<<<<<<<<<< End Expected Exception");
+			ConcurrentTestExceptionHandler.enable();
+		}
+	}
+
+//==================================================================================================
+// Swing Methods
+//==================================================================================================	
 
 	/**
 	 * Waits for the Swing thread to process any pending events. This method
@@ -1777,7 +1799,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	/**
 	 * Creates a file path with a filename that is under the system temp
 	 * directory. The path returned will not point to an existing file. The
-	 * suffix of the file will be <tt>.tmp</tt>.
+	 * suffix of the file will be <code>.tmp</code>.
 	 * 
 	 * @param name the filename
 	 * @return a new file path
@@ -1841,7 +1863,7 @@ public abstract class AbstractGenericTest extends AbstractGTest {
 	 * prefix and the given suffix. The final filename will also include the
 	 * current test name, as well as any data added by
 	 * {@link File#createTempFile(String, String)}. The file suffix will be
-	 * <tt>.tmp</tt>
+	 * <code>.tmp</code>
 	 * <p>
 	 * The file will be marked to delete on JVM exit. This will not work if the
 	 * JVM is taken down the hard way, as when pressing the stop button in

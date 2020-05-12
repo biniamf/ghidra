@@ -354,63 +354,27 @@ macro setSflag() {
 }
 
 macro setResultFlags(result) {
-	$(Nflag) = (result & 0x80) == 0x80;
+	$(Nflag) = (result s< 0);
 	$(Zflag) = (result == 0x0);
 	setSflag();
-}
-
-macro setResult16Flags(result) {
-	$(Nflag) = (result & 0x8000) == 0x8000;
-	$(Zflag) = (result == 0x0);
-	setSflag();
-}
-
-macro setSubCarry(pre,sub) { # pre - sub
-	$(Cflag) = (pre < sub);
-}
-
-# The decompilation looks better when the pcode comparision is used,
-# rather than walking though the bit examples in the manual.
-# todo: consolidate these
-macro setVflagForSub(pre,sub,res) { # res = pre - sub
-	$(Vflag) = sborrow(pre,sub);
-}
-
-macro setVflagForSub16(pre,sub) { # pre - sub
-	$(Vflag) = sborrow(pre,sub);
-}
-
-macro setVflagForAdd(arg1,arg2,res) {
-	local a = (arg1 & 0x80) >> 7;
-	local b = (arg2 & 0x80) >> 7;
-	local c = (res & 0x80) >> 7;
-	local V = (a & b & (~c)) | ((~a) & (~b) & c);
-	$(Vflag) = V & 0x01;
-}
-
-macro setCflagForAdd(arg1,arg2,res) {
-	local a = (arg1 & 0x80) >> 7;
-	local b = (arg2 & 0x80) >> 7;
-	local c = (res & 0x80) >> 7;
-	local V = (a & b) | (a & (~c)) | (b & (~c));
-	$(Cflag) = V & 0x01;
 }
 
 macro doSubtract(pre,sub,res) {
 	local x = pre - sub;
-	setVflagForSub(pre,sub,x);
-	setSubCarry(pre, sub);
+	$(Vflag) = sborrow(pre,sub);
+	$(Cflag) = (pre < sub);
 	setResultFlags(x);
 	$(Sflag) = pre s< sub;
 	res = x;
 }
 
-macro doSubtractWithCarry(pre,subNoCarry,res) {
-	local sub = subNoCarry + $(Cflag);
-	local x = pre - sub;
+macro doSubtractWithCarry(pre,sub,res) {
+	local partial = pre - sub;
+	local subCarry = sub + $(Cflag);
+	local x = pre - subCarry;
 	local oldZflag = $(Zflag);
-	setVflagForSub(pre,subNoCarry,x);
-	$(Cflag) = ((pre < sub) | (sub == 0 & $(Cflag) == 1));
+	$(Vflag) = sborrow(pre,sub) ^^ sborrow(partial, $(Cflag));
+	$(Cflag) = (pre < sub) || (partial < $(Cflag));
 	setResultFlags(x);
 	$(Sflag) = $(Nflag)^$(Vflag);
 	$(Zflag) = oldZflag & $(Zflag);
@@ -491,7 +455,7 @@ K7addr: val  is oplow4 & op9to10 & opbit8 [ val = ((1 ^ opbit8) << 7) | (opbit8 
 
 # Join against various spaces for dataspace...
 # #####################################################################################
-# COMMENTING OUT BECAUSE "Subtable symbol K7addr is not allowed in context block"
+# COMMENTING OUT BECAUSE "subtable symbol K7addr is not allowed in context block"
 #K7Ioaddr: val is K7addr [ val = K7addr - 0x20; ] {   tmp:1 = val; export tmp;  }
 # #####################################################################################
 # COMMENTING OUT BECAUSE "Subtable symbol K7Ioaddr is not allowed in context block"
@@ -536,26 +500,28 @@ define pcodeop break;
 @ifdef FUSION
 # add followed by adc
 :addw op1RdPair,op1RrPair        is phase=1 & op1hi6=0x3 & op2hi6=0x7 & op1RdPair & op1RrPair & fusion16rrrrPred {
-	$(Cflag) = carry(op1RdPair,op1RrPair);
 	local pre = op1RdPair;
 	local post = op1RdPair + op1RrPair;
+	$(Cflag) = carry(op1RdPair,op1RrPair);
+	$(Vflag) = scarry(pre,op1RrPair);
 	op1RdPair = post;
-	$(Vflag) = (0x0000 == (pre & 0x8000)) & ((post & 0x8000) == 0x8000);
-	setResult16Flags(post);
+	setResultFlags(post);
 }
 
 @endif
 # Rd,Rr
 :adc RdFull,RrFull               is phase=1 & ophi6=0x7 & RdFull & RrFull {
 	local res = RdFull + RrFull + $(Cflag);
-	setCflagForAdd(RdFull,RrFull,res);
+	$(Cflag) = carry(RdFull, RrFull) || carry(RdFull + RrFull, $(Cflag));
+	$(Vflag) = scarry(RdFull, RrFull) ^^ scarry(RdFull + RrFull, $(Cflag));
 	setResultFlags(res);
 	RdFull = res;
 }
 # Rd,Rr
 :add RdFull,RrFull               is phase=1 & ophi6=0x3 & RdFull & RrFull {
 	local res = RdFull + RrFull;
-	setCflagForAdd(RdFull,RrFull,res);
+	$(Cflag) = carry(RdFull,RrFull);
+	$(Vflag) = scarry(RdFull,RrFull);
 	setResultFlags(res);
 	RdFull = res;
 }
@@ -564,8 +530,8 @@ define pcodeop break;
 	local pre = Rdw2;
 	Rdw2 = Rdw2 + zext(K6);
 	$(Cflag) = carry(pre,zext(K6));
-	$(Vflag) = scarry(Rdw2,zext(K6)); #(0x0000 == (pre & 0x8000)) & ((Rdw2 & 0x8000) == 0x8000);
-	setResult16Flags(Rdw2);
+	$(Vflag) = scarry(Rdw2,zext(K6));
+	setResultFlags(Rdw2);
 }
 # and Rd,Rr
 :and RdFull,RrFull               is phase=1 & ophi6=8 & RdFull & RrFull {
@@ -674,18 +640,20 @@ define pcodeop break;
 }
 :cp RdFull,RrFull                is phase=1 & ophi6=0x05 & RdFull & RrFull {
 	local x = RdFull - RrFull;
-	setSubCarry(RdFull,RrFull);
-	setVflagForSub(RdFull,RrFull,x);
+	$(Cflag) = (RdFull < RrFull);
+	$(Vflag) = sborrow(RdFull,RrFull);
 	setResultFlags(x);
 # but doesn't set result into a register
 }
 :cpc RdFull,RrFull               is phase=1 & ophi6=0x1 & RdFull & RrFull {
 	local res = 0;
 	doSubtractWithCarry(RdFull,RrFull,res);
+	res = res; # avoid warning
 }
 :cpi RdHi,K8                     is phase=1 & ophi4=0x3 & RdHi & K8 {
 	local res = 0;
 	doSubtract(RdHi,K8,res);
+	res = res; # avoid warning
 }
 
 @ifdef FUSION
@@ -698,9 +666,9 @@ define pcodeop break;
 # cp; cpc sequence
 :cpw op1RdPair,op1RrPair phase=1 &  is op1hi6=0x5 & op2hi6=0x1 & fusion16rrrrPred & op1RdPair & op1RrPair {
 	local res = op1RdPair - op1RrPair;
-	setVflagForSub16(op1RdPair,op1RrPair);
-	setSubCarry(op1RdPair, op1RrPair);
-	setResult16Flags(res);
+	$(Vflag) = sborrow(op1RdPair,op1RrPair);
+	$(Cflag) = (op1RdPair < op1RrPair);
+	setResultFlags(res);
 	$(Sflag) = op1RdPair s< op1RrPair;
 }
 
@@ -747,7 +715,8 @@ define pcodeop break;
 	RdFull = val:1;
 }
 
-:elpm RdFull, Z^"+"              is phase=1 & ophi7=0x48 & oplow4=0x7 & RdFull & Z {
+ElpmPlus: Z^"+" is Z {}
+:elpm RdFull, ElpmPlus is phase=1 & ophi7=0x48 & oplow4=0x7 & RdFull & ElpmPlus {
 	ptr:3 = zext(Z) | (zext(RAMPZ) << 16);
 	tmp:2 = *[code]:2 (ptr >> 1);
 	val:2 = (tmp >> (8 * (Z & 0x1)));
@@ -836,10 +805,9 @@ define pcodeop break;
 }
 
 # ld Rd,Y+ ; ld Rd, X+; ld Rd, Z+
-:ld RdFull,RstPtr"+"             is phase=1 & ophi7=0x48 & oplow2=0x01 & RdFull & RstPtr {
-	tmp:2 = RstPtr;
-	RdFull = *[mem]:1 tmp;
-	RstPtr = RstPtr + 0x01;
+LdPlus: RstPtr^"+" is RstPtr { tmp:2 = RstPtr; RstPtr = RstPtr + 0x01; export tmp; }
+:ld RdFull,LdPlus is phase=1 & ophi7=0x48 & oplow2=0x01 & RdFull & LdPlus {
+  RdFull = *[mem]:1 LdPlus;
 }
 
 # ld Rd,-Y ; ld Rd, -X; ld Rd, -Z
@@ -852,9 +820,9 @@ LdPredec:  "-"^RstPtr  is RstPtr { RstPtr = RstPtr - 0x01; export RstPtr; }
 
 # ldd Rd,Y+q
 # ldd Rd,Z+q
-:ldd RdFull,Rstq"+"q6            is phase=1 & ophi2=0x2 & opbit12=0 & opbit9=0 & Rstq & RdFull & q6 {
-	local ptr = Rstq + zext(q6);
-	RdFull = *[mem]:1 ptr;
+LddYq: Rstq^"+"^q6 is Rstq & q6 { local ptr = Rstq + zext(q6); export ptr; }
+:ldd RdFull,LddYq is phase=1 & ophi2=0x2 & opbit12=0 & opbit9=0 & LddYq & RdFull {
+  RdFull = *[mem]:1 LddYq;
 }
 
 # Rd,K
@@ -903,12 +871,13 @@ LdPredec:  "-"^RstPtr  is RstPtr { RstPtr = RstPtr - 0x01; export RstPtr; }
 	RdFull = val:1;
 }
 # lpm Rd,Z+
-:lpm RdFull,Z"+"                 is phase=1 & ophi7=0x48 & op1to3=0x2 & RdFull & Z & opbit0=1 {
-	ptr:$(PCBYTESIZE) = zext(Z);
-	tmp:$(PCBYTESIZE) = *[code]:$(PCBYTESIZE) (ptr >> 1);
-	val:$(PCBYTESIZE) = (tmp >> (8 * (Z & 0x1)));
-	RdFull = val:1;
-	Z = Z + 1;
+LpmPlus: Z^"+" is Z {}
+:lpm RdFull,LpmPlus is phase=1 & ophi7=0x48 & op1to3=0x2 & RdFull & LpmPlus & opbit0=1 {
+  ptr:$(PCBYTESIZE) = zext(Z);
+  tmp:$(PCBYTESIZE) = *[code]:$(PCBYTESIZE) (ptr >> 1);
+  val:$(PCBYTESIZE) = (tmp >> (8 * (Z & 0x1)));
+  RdFull = val:1;
+  Z = Z + 1;
 }
 # lsl  - just an assembly mnemonic for add
 :lsr RdFull                      is phase=1 & ophi7=0x4a & oplow4=0x6 & RdFull {
@@ -1032,10 +1001,10 @@ LdPredec:  "-"^RstPtr  is RstPtr { RstPtr = RstPtr - 0x01; export RstPtr; }
 	# doSubtract(op1RdPairHi,K16fuse,op1RdPairHi);
 	local res = op1RdPairHi - K16fuse;
 	local pre = op1RdPairHi;
-	setVflagForSub16(pre,K16fuse);
-	setSubCarry(op1RdPairHi, K16fuse);
+	$(Vflag) = sborrow(pre,K16fuse);
+	$(Cflag) = (op1RdPairHi < K16fuse);
 	op1RdPairHi = res;
-	setResult16Flags(res);
+	setResultFlags(res);
 	$(Sflag) = pre s< K16fuse;
 }
 
@@ -1054,9 +1023,9 @@ LdPredec:  "-"^RstPtr  is RstPtr { RstPtr = RstPtr - 0x01; export RstPtr; }
 :sbiw Rdw2,K6                    is phase=1 & ophi8=0x97 & Rdw2 & K6 {
 	local pre = Rdw2;
 	Rdw2 = Rdw2 - zext(K6);
-	$(Cflag) = zext(K6) > pre;
-	$(Vflag) = (0x8000 == (pre & 0x8000)) & ((Rdw2 & 0x8000) == 0x0000);
-	setResult16Flags(Rdw2);
+	$(Cflag) = (pre < zext(K6));
+	$(Vflag) = sborrow(pre,zext(K6));
+	setResultFlags(Rdw2);
 }
 # sbr is an alias for ori
 
@@ -1086,11 +1055,13 @@ define pcodeop store_program_mem; # make this stand out.
 	*[code]:$(PCBYTESIZE) ptr = R1R0;
 	store_program_mem();
 }
-:spm Z^"+"                       is phase=1 & ophi16=0x95f8 & Z {
-	ptr:$(PCBYTESIZE) = zext(Z) << 1;
-	*[code]:$(PCBYTESIZE) ptr = R1R0;
-	Z = Z + 1;
-	store_program_mem();
+
+SpmPlus: Z^"+" is Z {}
+:spm SpmPlus is phase=1 & ophi16=0x95f8 & SpmPlus {
+  ptr:$(PCBYTESIZE) = zext(Z) << 1;
+  *[code]:$(PCBYTESIZE) ptr = R1R0;
+  Z = Z + 1;
+  store_program_mem();
 }
 # For stores, see the ld code  (just flip bit 9)
 :st X, RdFull                    is phase=1 & ophi7=0x49 & oplow4=0xc & X & RdFull {
@@ -1105,7 +1076,6 @@ define pcodeop store_program_mem; # make this stand out.
 
 # st Rd,Y+ ; st Rd, X+; st Rd, Z+
 StPlus: RstPtr^"+"  is  RstPtr { tmp:2 = RstPtr; RstPtr = RstPtr + 0x01; export tmp; }
-
 :st StPlus, RdFull               is phase=1 & ophi7=0x49 & oplow2=0x01 & RdFull & StPlus {
 	*[mem]:1 StPlus = RdFull;
 }

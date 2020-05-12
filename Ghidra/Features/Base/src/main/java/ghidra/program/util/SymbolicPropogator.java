@@ -125,10 +125,13 @@ public class SymbolicPropogator {
 	 * Process a subroutine using the processor function.
 	 * The process function can control what flows are followed and when to stop.
 	 * 
-	 * @param entryPoint start address
-	 * @param processor processor to use
+	 * @param startAddr start address
+	 * @param restrictSet the address set to restrict the constant flow to
+	 * @param eval the context evaluator to use
+	 * @param saveContext true if the context should be saved
+	 * @param monitor the task monitor
 	 * @return the address set of instructions that were followed
-	 * @throws CancelledException 
+	 * @throws CancelledException if the task is cancelled
 	 */
 	public AddressSet flowConstants(Address startAddr, AddressSetView restrictSet,
 			ContextEvaluator eval, boolean saveContext, TaskMonitor monitor)
@@ -278,7 +281,7 @@ public class SymbolicPropogator {
 	/**
 	 * Get constant or register relative value assigned to the 
 	 * specified register at the specified address
-	 * @param addr address
+	 * @param toAddr address
 	 * @param reg register
 	 * @return register value
 	 */
@@ -757,8 +760,9 @@ public class SymbolicPropogator {
 			return nextAddr;
 		}
 
+		Address minInstrAddress = instruction.getMinAddress();
 		if (debug) {
-			Msg.info(this, instruction.getMinAddress() + "   " + instruction);
+			Msg.info(this, minInstrAddress + "   " + instruction);
 		}
 
 		int mustClearAllUntil_PcodeIndex = -1;
@@ -830,8 +834,7 @@ public class SymbolicPropogator {
 							val1 = vContext.getValue(in[0], evaluator);
 							lval1 = vContext.getConstant(val1, evaluator);
 							vt = vContext.getVarnode(
-								instruction.getMinAddress().getAddressSpace().getBaseSpaceID(),
-								lval1, 0);
+								minInstrAddress.getAddressSpace().getBaseSpaceID(), lval1, 0);
 							makeReference(vContext, instruction, ptype, -1, vt,
 								instruction.getFlowType(), monitor);
 						}
@@ -910,8 +913,8 @@ public class SymbolicPropogator {
 						if (target != null) {
 							if (target.isMemoryAddress()) {
 								vContext.propogateResults(false);
-								conflict |= vContext.mergeToFutureFlowState(
-									instruction.getMinAddress(), target);
+								conflict |=
+									vContext.mergeToFutureFlowState(minInstrAddress, target);
 							}
 							func = prog.getFunctionManager().getFunctionAt(target);
 							if (func == null && ptype == PcodeOp.CALLIND) {
@@ -983,8 +986,8 @@ public class SymbolicPropogator {
 								instruction.getAddress());
 						}
 						vContext.propogateResults(false);
-						conflict |= vContext.mergeToFutureFlowState(instruction.getMinAddress(),
-							in[0].getAddress());
+						conflict |=
+							vContext.mergeToFutureFlowState(minInstrAddress, in[0].getAddress());
 						pcodeIndex = ops.length; // break out of the processing
 						break;
 
@@ -995,14 +998,14 @@ public class SymbolicPropogator {
 							int sequenceOffset = (int) in[0].getOffset();
 							if ((pcodeIndex + sequenceOffset) >= ops.length) {
 								vContext.propogateResults(false);
-								conflict |= vContext.mergeToFutureFlowState(
-									instruction.getMinAddress(), instruction.getFallThrough());
+								conflict |= vContext.mergeToFutureFlowState(minInstrAddress,
+									instruction.getFallThrough());
 							}
 						}
 						else if (in[0].isAddress()) {
 							vt = in[0];
 							vContext.propogateResults(false);
-							conflict |= vContext.mergeToFutureFlowState(instruction.getMinAddress(),
+							conflict |= vContext.mergeToFutureFlowState(minInstrAddress,
 								in[0].getAddress());
 						}
 
@@ -1043,8 +1046,7 @@ public class SymbolicPropogator {
 									if (fallThru != null) {
 										// we don't know what will happen from here on, but anything before should in theory propagate
 										vContext.propogateResults(true);
-										conflict |= vContext.mergeToFutureFlowState(
-											instruction.getMinAddress(),
+										conflict |= vContext.mergeToFutureFlowState(minInstrAddress,
 											instruction.getFallThrough());
 									}
 									// everything that is in the cache from here on should be cleared
@@ -1070,7 +1072,9 @@ public class SymbolicPropogator {
 								}
 							}
 							else if (!evaluator.followFalseConditionalBranches()) {
-								nextAddr = in[0].getAddress();
+								// pcode addresses are raw addresses, make sure address is in same instruction space
+								nextAddr = minInstrAddress.getAddressSpace().getOverlayAddress(
+									in[0].getAddress());
 								pcodeIndex = ops.length; // break out of the processing
 							}
 						}
@@ -1176,28 +1180,14 @@ public class SymbolicPropogator {
 					case PcodeOp.INT_AND:
 						val1 = vContext.getValue(in[0], false, evaluator);
 						val2 = vContext.getValue(in[1], false, evaluator);
-						if (val1.equals(val2)) {
-							result = val1;
-						}
-						else {
-							//lresult = context.getConstant(val1,evaluator) & context.getConstant(val2,evaluator);
-							//result = context.createVarnode(lresult, val1.getSpace(), val1.getSize());
-							result = vContext.and(val1, val2, evaluator);
-						}
+						result = vContext.and(val1, val2, evaluator);
 						vContext.putValue(out, result, mustClearAll);
 						break;
 
 					case PcodeOp.INT_OR:
 						val1 = vContext.getValue(in[0], false, evaluator);
 						val2 = vContext.getValue(in[1], false, evaluator);
-						if (!val1.equals(val2)) {
-							lresult = vContext.getConstant(val1, evaluator) |
-								vContext.getConstant(val2, evaluator);
-							result = vContext.createConstantVarnode(lresult, val1.getSize());
-						}
-						else {
-							result = val1;
-						}
+						result = vContext.or(val1, val2, evaluator);
 						vContext.putValue(out, result, mustClearAll);
 						break;
 
@@ -1434,7 +1424,7 @@ public class SymbolicPropogator {
 		}
 		else {
 			if (fallthru != null) {
-				conflict |= vContext.mergeToFutureFlowState(instruction.getMinAddress(), fallthru);
+				conflict |= vContext.mergeToFutureFlowState(minInstrAddress, fallthru);
 			}
 		}
 
@@ -1851,7 +1841,7 @@ public class SymbolicPropogator {
 //						}
 //					} else
 
-			        if (!vContext.isStackSymbolicSpace(refLocation) && evaluator != null) {
+					if (!vContext.isStackSymbolicSpace(refLocation) && evaluator != null) {
 						Address constant = program.getAddressFactory().getAddress(
 							(int) targetSpaceID.getOffset(), offset);
 						Address newTarget = evaluator.evaluateConstant(vContext, instruction,
@@ -1859,8 +1849,7 @@ public class SymbolicPropogator {
 						if (newTarget != null) {
 							makeReference(vContext, instruction, Reference.MNEMONIC,
 								newTarget.getAddressSpace().getBaseSpaceID(), newTarget.getOffset(),
-								0, reftype,
-								pcodeType, false, monitor);
+								0, reftype, pcodeType, false, monitor);
 							return;
 						}
 					}
@@ -2038,7 +2027,8 @@ public class SymbolicPropogator {
 		}
 
 		// only want returns that can fit in a pointer!
-		returnLoc = conv.getReturnLocation(new PointerDataType(Undefined.DEFAULT,pointerSize), program);
+		returnLoc =
+			conv.getReturnLocation(new PointerDataType(Undefined.DEFAULT, pointerSize), program);
 
 		return returnLoc;
 	}
@@ -2165,14 +2155,14 @@ public class SymbolicPropogator {
 	 *  The target could be an external Address carried along and then finally used.
 	 *  External addresses are OK as long as nothing is done to the offset.
 	 *  
-	 * @param varnodeContext - context to use for any other infomation needed
+	 * @param vContext - context to use for any other infomation needed
 	 * @param instruction - instruction to place the reference on.
 	 * @param opIndex - operand it should be placed on, or -1 if unknown
-	 * @param spaceID target space ID or -1 if only offset is known
+	 * @param knownSpaceID target space ID or -1 if only offset is known
 	 * @param wordOffset - target offset that is word addressing based
 	 * @param refType - type of reference
 	 * @param pcodeop - pcode op that caused the reference
-	 * @param monitor
+	 * @param monitor - the task monitor
 	 */
 	public void makeReference(VarnodeContext vContext, Instruction instruction, int opIndex,
 			long knownSpaceID, long wordOffset, int size, RefType refType, int pcodeop,
